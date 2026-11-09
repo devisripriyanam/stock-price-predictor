@@ -2,11 +2,17 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 
+RANDOM_FOREST = "Random Forest (returns)"
+LAST_CLOSE = "Last close"
+SNAPSHOT_TEST_START = "2025-01-01"
+VALIDATION_PERIOD = "2023–2024"
 RETURN_LAGS = (1, 2, 3)
 AVERAGE_WINDOWS = (5, 10, 20)
 FEATURE_COLUMNS = [
@@ -30,7 +36,7 @@ class Forecast:
                 "RMSE": root_mean_squared_error(actual, self.test[column]),
                 "R²": r2_score(actual, self.test[column]),
             }
-            for name, column in [("Selected model", "Predicted"), ("Last close", "Baseline")]
+            for name, column in [("Selected model", "Predicted"), (LAST_CLOSE, "Baseline")]
         ])
 
 
@@ -81,25 +87,76 @@ def test_results(prices, split, predicted):
     })
 
 
+def make_random_forest():
+    return RandomForestRegressor(
+        n_estimators=300, max_depth=8, min_samples_leaf=3, random_state=42, n_jobs=-1,
+    )
+
+
+def fit_return_model(model, features, close, end):
+    # Feature row t predicts the label on row t + 1. The first 19 rows warm up MA20.
+    first = max(AVERAGE_WINDOWS) - 1
+    origin_close = close.iloc[first:end - 1].to_numpy()
+    target_close = close.iloc[first + 1:end].to_numpy()
+    model.fit(features.iloc[first:end - 1], target_close / origin_close - 1)
+
+
 def train_random_forest(prices, test_start=None):
     split = test_start_index(prices, test_start, min_training=80)
     features = return_features(prices)[FEATURE_COLUMNS]
     close = prices["Close"]
-    target = close.shift(-1) / close - 1
-    model = RandomForestRegressor(
-        n_estimators=300, max_depth=8, min_samples_leaf=3, random_state=42, n_jobs=-1,
-    )
+    model = make_random_forest()
 
-    # Feature row t predicts the label on row t + 1. The first 19 rows warm up MA20.
-    first = max(AVERAGE_WINDOWS) - 1
-    model.fit(features.iloc[first:split - 1], target.iloc[first:split - 1])
+    fit_return_model(model, features, close, split)
     test_return = model.predict(features.iloc[split - 1:-1])
     test_prices = close.iloc[split - 1:-1].to_numpy() * (1 + test_return)
 
     # Refit through the most recent observed label for the next-session estimate.
-    model.fit(features.iloc[first:-1], target.iloc[first:-1])
+    fit_return_model(model, features, close, len(prices))
     next_return = model.predict(features.iloc[-1:])[0]
     return Forecast(test_results(prices, split, test_prices), float(close.iloc[-1] * (1 + next_return)))
+
+
+def walk_forward_benchmark(prices):
+    validation = prices.loc[prices["Date"] < pd.Timestamp(SNAPSHOT_TEST_START)]
+    features = return_features(validation)[FEATURE_COLUMNS]
+    dates, close = validation["Date"], validation["Close"]
+    models = {
+        RANDOM_FOREST: make_random_forest(),
+        "Ridge regression (returns)": make_pipeline(StandardScaler(), Ridge(alpha=100)),
+        "Histogram gradient boosting (returns)": HistGradientBoostingRegressor(
+            max_iter=100, max_leaf_nodes=7, min_samples_leaf=40, learning_rate=0.03,
+            l2_regularization=1, early_stopping=False, random_state=42,
+        ),
+    }
+
+    folds = {}
+    for year in (2023, 2024):
+        split = test_start_index(validation, f"{year}-01-01", min_training=80)
+        end = dates.searchsorted(pd.Timestamp(f"{year + 1}-01-01"))
+        if end - split < 2:
+            raise ValueError(f"The snapshot has too few observations to score {year}.")
+
+        previous_close = close.iloc[split - 1:end - 1].to_numpy()
+        fold = pd.DataFrame({"Actual": close.iloc[split:end].to_numpy(), LAST_CLOSE: previous_close})
+        for name, model in models.items():
+            fit_return_model(model, features, close, split)
+            predicted_return = model.predict(features.iloc[split - 1:end - 1])
+            fold[name] = previous_close * (1 + predicted_return)
+        folds[str(year)] = fold
+
+    folds[VALIDATION_PERIOD] = pd.concat(folds.values(), ignore_index=True)
+    return pd.DataFrame([
+        {
+            "Period": period,
+            "Model": name,
+            "Forecasts": len(fold),
+            "MAE": mean_absolute_error(fold["Actual"], fold[name]),
+            "RMSE": root_mean_squared_error(fold["Actual"], fold[name]),
+        }
+        for period, fold in folds.items()
+        for name in (LAST_CLOSE, *models)
+    ])
 
 
 def train_lstm(prices, lookback, epochs, batch_size, test_start=None):

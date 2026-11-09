@@ -34,6 +34,14 @@ The bundled dataset's forecast starts from the 31 December 2025 close. In Yahoo 
 
 The baseline has slightly lower MAE on this holdout, and the forest has slightly lower RMSE. The exercise measures historical one-session forecast errors for coursework.
 
+### Walk-forward model comparison
+
+With the bundled Reliance dataset selected, open **Walk-forward model benchmark** and click **Run walk-forward benchmark**. It compares Random Forest, Ridge regression, and histogram gradient boosting on the same return features, alongside the last-close baseline.
+
+The first fold trains through 2022 and scores 2023. The second expands training through 2023 and scores 2024. The dashboard reports MAE and RMSE for each year and across all 491 validation targets, ranks the methods by pooled MAE, and exports the scores as a CSV. Use **Train & predict** separately to evaluate the selected forecast model on the 2025 holdout.
+
+On the bundled data, last close has the lowest pooled MAE at ₹11.967. Random Forest leads the trained models at ₹12.002.
+
 ### Optional LSTM comparison
 
 With Python 3.13 installed on Windows, create a separate environment for the optional LSTM and select **LSTM (adjusted close)** in the sidebar. The main app and Random Forest run with the standard requirements. [TensorFlow installation and supported versions](https://www.tensorflow.org/install/pip)

@@ -13,7 +13,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from forecasting import prepare_prices, train_lstm, train_random_forest
+from forecasting import (
+    LAST_CLOSE, RANDOM_FOREST, SNAPSHOT_TEST_START, VALIDATION_PERIOD,
+    prepare_prices, train_lstm, train_random_forest, walk_forward_benchmark,
+)
 
 st.set_page_config(page_title="Stock AI | Predictor", page_icon="📈", layout="wide")
 
@@ -21,7 +24,6 @@ DB_PATH = "stock_predictor.db"
 SNAPSHOT = Path(__file__).with_name("data") / "reliance_daily_2016_2025.csv"
 SNAPSHOT_LABEL = "Reliance dataset (2016–2025)"
 LIVE_LABEL = "Yahoo Finance ticker"
-RANDOM_FOREST = "Random Forest (returns)"
 LSTM = "LSTM (adjusted close)"
 
 def init_db():
@@ -145,6 +147,7 @@ with st.sidebar:
     if st.button("Sign out", width="stretch"):
         del st.session_state["user"]
         st.session_state.pop("forecast_result", None)
+        st.session_state.pop("benchmark", None)
         st.rerun()
 
 st.title("📈 Stock AI — Price Prediction")
@@ -154,6 +157,28 @@ st.caption("Machine learning coursework demonstration.")
 if snapshot and SNAPSHOT.is_file():
     st.download_button("Download Reliance dataset (CSV)", SNAPSHOT.read_bytes(),
                        file_name=SNAPSHOT.name, mime="text/csv", on_click="ignore")
+    with st.expander("Walk-forward model benchmark"):
+        st.caption("Each model trains on sessions before the validation year. The 2025 data is reserved for the final test.")
+        if st.button("Run walk-forward benchmark"):
+            st.session_state.pop("benchmark", None)
+            try:
+                with st.spinner("Scoring models on 2023 and 2024..."):
+                    validation_prices = prepare_prices(pd.read_csv(SNAPSHOT))
+                    st.session_state.benchmark = walk_forward_benchmark(validation_prices)
+            except (OSError, ValueError) as error:
+                st.error(f"Could not run the benchmark. {error}")
+
+        benchmark = st.session_state.get("benchmark")
+        if benchmark is not None:
+            pooled = benchmark.loc[benchmark["Period"] == VALIDATION_PERIOD].sort_values("MAE")
+            best_model = pooled.loc[pooled["Model"] != LAST_CLOSE, "Model"].iloc[0]
+            st.write(f"Lowest overall MAE in {VALIDATION_PERIOD} — **{pooled['Model'].iloc[0]}**")
+            st.caption(f"Lowest MAE among trained models — {best_model}. Errors are in INR.")
+            st.dataframe(pooled.drop(columns="Period").round(3), width="stretch", hide_index=True)
+            st.dataframe(benchmark.loc[benchmark["Period"] != VALIDATION_PERIOD].round(3),
+                         width="stretch", hide_index=True)
+            st.download_button("Download benchmark scores (CSV)", benchmark.to_csv(index=False),
+                               file_name="reliance_walk_forward_scores.csv", mime="text/csv", on_click="ignore")
 
 settings = (username, source, ticker, period, model_choice, lstm_settings)
 if run:
@@ -171,7 +196,7 @@ if run:
             st.error("Could not load Yahoo Finance data. Try again or choose the bundled Reliance dataset.")
         st.stop()
 
-    test_start = "2025-01-01" if snapshot else None
+    test_start = SNAPSHOT_TEST_START if snapshot else None
     try:
         with st.spinner(f"Training {model_choice}..."):
             if lstm_settings:
