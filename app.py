@@ -22,8 +22,16 @@ st.set_page_config(page_title="Stock Price Predictor", page_icon="📈")
 
 DB_PATH = "stock_predictor.db"
 SNAPSHOT = Path(__file__).with_name("data") / "reliance_daily_2016_2025.csv"
-SNAPSHOT_LABEL = "Reliance dataset (2016–2025)"
-LIVE_LABEL = "Yahoo Finance ticker"
+DEMO_MARKET = "Reliance demo · India (offline)"
+CUSTOM_TICKER = "Enter a ticker"
+MARKET_STOCKS = {
+    "India": {"RELIANCE.NS": "Reliance Industries", "TCS.NS": "Tata Consultancy Services"},
+    "United States": {"AAPL": "Apple", "MSFT": "Microsoft"},
+    "United Kingdom": {"SHEL.L": "Shell", "AZN.L": "AstraZeneca"},
+    "Japan": {"7203.T": "Toyota", "6758.T": "Sony"},
+    "Canada": {"RY.TO": "Royal Bank of Canada", "TD.TO": "Toronto-Dominion Bank"},
+    "Australia": {"BHP.AX": "BHP", "CBA.AX": "Commonwealth Bank"},
+}
 LSTM = "LSTM (adjusted close)"
 
 def init_db():
@@ -89,6 +97,7 @@ def load_stock(symbol, period):
 
     result = results[0]
     metadata = result["meta"]
+    currency = metadata.get("currency") or ""
     dates = pd.to_datetime(result["timestamp"], unit="s", utc=True).tz_convert(metadata["exchangeTimezoneName"])
     indicators = result["indicators"]
     bars = indicators["quote"][0]
@@ -101,8 +110,8 @@ def load_stock(symbol, period):
     if end:
         session_close = pd.Timestamp(end, unit="s", tz=dates.tz)
         if session_close.normalize() == now.normalize() and now >= session_close:
-            return prepare_prices(data)
-    return prepare_prices(data.loc[dates.normalize() < now.normalize()])
+            return prepare_prices(data), currency
+    return prepare_prices(data.loc[dates.normalize() < now.normalize()]), currency
 
 def save_prediction(username, ticker, close, pred, model_name):
     with closing(sqlite3.connect(DB_PATH)) as conn, conn:
@@ -122,18 +131,26 @@ def get_history(username):
 
 def render_forecast(username):
     with st.container(border=True):
-        st.subheader("Choose your data")
-        source = st.selectbox("Data source", [SNAPSHOT_LABEL, LIVE_LABEL])
-        snapshot = source == SNAPSHOT_LABEL
+        st.subheader("Choose a stock")
+        market = st.selectbox("Stock market", [DEMO_MARKET, *MARKET_STOCKS, CUSTOM_TICKER])
+        snapshot = market == DEMO_MARKET
         if snapshot:
-            ticker, period = "RELIANCE.NS", None
-            st.caption("Daily prices for Reliance Industries. Runs offline and tests forecasts on 2025 prices.")
+            ticker = "RELIANCE.NS"
+            stock_name = "Reliance Industries"
+            st.caption("Practice with saved Reliance prices from 2016–2025.")
+        elif market == CUSTOM_TICKER:
+            ticker = st.text_input("Yahoo Finance ticker", placeholder="For example, AAPL or TCS.NS").strip().upper()
+            stock_name = None
         else:
-            ticker = st.text_input("Ticker symbol", "RELIANCE.NS", help="Examples include TCS.NS and AAPL.").strip().upper()
-            period = st.selectbox("Historical period", ["1y", "2y", "5y", "10y"], index=2)
+            stocks = MARKET_STOCKS[market]
+            ticker = st.selectbox("Stock", list(stocks), format_func=stocks.get, key=f"stock_{market}")
+            stock_name = stocks[ticker]
 
+        period = None
         lstm_settings = None
         with st.expander("Advanced settings"):
+            if not snapshot:
+                period = st.selectbox("Historical period", ["1y", "2y", "5y", "10y"], index=2)
             model_choice = st.selectbox("Prediction model", [RANDOM_FOREST, LSTM])
             if model_choice == LSTM:
                 lookback = st.slider("Past sessions to use", 20, 100, 60, 10)
@@ -144,12 +161,15 @@ def render_forecast(username):
                 st.caption("Random Forest averages forecasts from many decision trees.")
         run = st.button("Run forecast", type="primary")
 
-    settings = (username, source, ticker, period, model_choice, lstm_settings)
+    settings = (username, market, ticker, period, model_choice, lstm_settings)
     if run:
         st.session_state.pop("forecast_result", None)
         try:
             with st.spinner(f"Loading daily prices for {ticker}…"):
-                prices = prepare_prices(pd.read_csv(SNAPSHOT)) if snapshot else load_stock(ticker, period)
+                if snapshot:
+                    prices, currency = prepare_prices(pd.read_csv(SNAPSHOT)), "INR"
+                else:
+                    prices, currency = load_stock(ticker, period)
         except ValueError as error:
             st.error(str(error))
             return
@@ -177,54 +197,59 @@ def render_forecast(username):
             return
 
         if username:
-            history_model = f"{model_choice} · {SNAPSHOT_LABEL}" if snapshot else model_choice
+            history_model = f"{model_choice} · {DEMO_MARKET}" if snapshot else model_choice
             save_prediction(username, ticker, prices["Close"].iloc[-1], forecast.next_close, history_model)
-        st.session_state.forecast_result = (settings, prices, forecast)
+        st.session_state.forecast_result = (settings, prices, forecast, currency)
 
     saved = st.session_state.get("forecast_result")
     if saved is not None and saved[0] == settings:
-        _, prices, forecast = saved
-        render_result(prices, forecast, ticker, model_choice, snapshot)
+        _, prices, forecast, currency = saved
+        render_result(prices, forecast, ticker, stock_name, model_choice, currency)
     else:
         st.caption("Run a forecast to see the estimated close and how the model performed on past data.")
 
 
-def render_result(prices, forecast, ticker, model_choice, snapshot):
+def render_result(prices, forecast, ticker, stock_name, model_choice, currency):
     test = forecast.test
     metrics = forecast.metrics()
     latest = prices["Close"].iloc[-1]
     origin = prices["Date"].iloc[-1]
     percent = (forecast.next_close / latest - 1) * 100
-    currency = "₹" if snapshot else ""
+    price_prefix = "₹" if currency == "INR" else f"{currency} " if currency else ""
+    price_axis = f"Adjusted close ({currency})" if currency else "Adjusted close"
 
     st.subheader("Forecast result")
+    if stock_name:
+        st.write(stock_name)
     st.caption(f"{ticker} · {model_choice} · Uses prices through {origin:%d %b %Y}")
+    if currency in ("GBp", "GBX"):
+        st.caption("This listing is quoted in British pence.")
     estimate, previous = st.columns(2)
-    estimate.metric("Estimated next close", f"{currency}{forecast.next_close:,.2f}",
+    estimate.metric("Estimated next close", f"{price_prefix}{forecast.next_close:,.2f}",
                     f"{percent:+.2f}% vs. last close", delta_color="off", border=True)
-    previous.metric("Last adjusted close", f"{currency}{latest:,.2f}", border=True)
+    previous.metric("Last adjusted close", f"{price_prefix}{latest:,.2f}", border=True)
 
     st.subheader("How accurate was it?")
     model_mae, baseline_mae = metrics["MAE"]
-    st.write(f"The model was off by **{currency}{model_mae:,.2f}** on average. Carrying the last close forward "
-             f"was off by **{currency}{baseline_mae:,.2f}** on the same dates.")
+    st.write(f"The model was off by **{price_prefix}{model_mae:,.2f}** on average. Carrying the last close forward "
+             f"was off by **{price_prefix}{baseline_mae:,.2f}** on the same dates.")
     st.caption(f"{len(test)} test forecasts from {test['Date'].iloc[0]:%d %b %Y} to {test['Date'].iloc[-1]:%d %b %Y}.")
 
     comparison = go.Figure()
     for column, name, dash in (("Actual", "Actual close", "solid"), ("Predicted", "Estimated close", "dash")):
         comparison.add_trace(go.Scatter(x=test["Date"], y=test[column], name=name, mode="lines", line=dict(dash=dash)))
     comparison.update_layout(height=320, margin=dict(l=0, r=0, t=24, b=0), hovermode="x unified",
-                             legend=dict(orientation="h", y=1.08), yaxis_title="Adjusted close")
+                             legend=dict(orientation="h", y=1.08), yaxis_title=price_axis)
     st.plotly_chart(comparison, width="stretch", config={"displayModeBar": False})
 
     with st.expander("Test details and downloads"):
         st.caption("MAE measures the average size of an error. RMSE gives bigger errors more weight. "
                    "Both use the stock’s price units.")
         st.dataframe(metrics.replace({"Selected model": model_choice}).round(3), hide_index=True)
-        st.download_button("Download test forecasts (CSV)", test.to_csv(index=False),
+        st.download_button("Download test forecasts (CSV)", test.assign(Currency=currency).to_csv(index=False),
                            file_name=f"{ticker.lower()}_{'random_forest' if model_choice == RANDOM_FOREST else 'lstm'}_results.csv",
                            mime="text/csv", on_click="ignore")
-        st.line_chart(prices, x="Date", y="Close", y_label="Historical adjusted close", height=240)
+        st.line_chart(prices, x="Date", y="Close", y_label=price_axis, height=240)
 
 
 def render_comparison():

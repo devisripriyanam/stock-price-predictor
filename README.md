@@ -16,7 +16,7 @@ On macOS or Linux, use `python3` to create the environment and `.venv/bin/python
 
 ## Use the app
 
-1. Open **Forecast**, keep the bundled Reliance dataset or choose a Yahoo Finance ticker, then click **Run forecast**.
+1. Open **Forecast** and click **Run forecast** to try the offline Reliance demo. For live prices, choose a country and a stock by name. The picker includes India, the United States, the United Kingdom, Japan, Canada, and Australia. Choose **Enter a ticker** for other Yahoo Finance listings.
 2. Read the estimated close and the average test error. Open **Test details and downloads** for the full metrics and forecast CSV.
 3. Open **Model comparison** to compare methods on the bundled dataset. Use **History** to sign in or create an optional demo account. Forecasts made while signed in are saved in a local SQLite file.
 
@@ -24,7 +24,7 @@ On macOS or Linux, use `python3` to create the environment and `.venv/bin/python
 
 The bundled `data/reliance_daily_2016_2025.csv` contains 2,470 daily records for Reliance Industries (`RELIANCE.NS`), from 1 January 2016 through 31 December 2025. It includes date, open, high, low, close, adjusted close and volume. The default dataset works offline and can be downloaded from the app. The alternative Yahoo Finance source retrieves daily data for a ticker you select. [Historical prices](https://finance.yahoo.com/quote/RELIANCE.NS/history/) · [Source data](https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?period1=1451586600&period2=1767205800&interval=1d&events=history)
 
-The bundled dataset's forecast starts from the 31 December 2025 close. In Yahoo Finance mode, the app includes the current exchange-local day when Yahoo provides a completed regular session for that day.
+The bundled dataset's forecast starts from the 31 December 2025 close. In Yahoo Finance mode, the app includes the current exchange-local day when Yahoo provides a completed regular session for that day. Forecasts and test exports use the listing’s quote currency. For London listings quoted in British pence, the app displays `GBp` or `GBX`.
 
 ## Model and evaluation
 
