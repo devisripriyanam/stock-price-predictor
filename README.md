@@ -12,7 +12,13 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-On macOS or Linux, use `python3` to create the environment and `.venv/bin/python` to install and run the app. Open the local URL shown in the terminal and create a demo account. The app saves prediction history in a local SQLite file.
+On macOS or Linux, use `python3` to create the environment and `.venv/bin/python` to install and run the app. Open the local URL shown in the terminal.
+
+## Use the app
+
+1. Open **Forecast**, keep the bundled Reliance dataset or choose a Yahoo Finance ticker, then click **Run forecast**.
+2. Read the estimated close and the average test error. Open **Test details and downloads** for the full metrics and forecast CSV.
+3. Open **Model comparison** to compare methods on the bundled dataset. Use **History** to sign in or create an optional demo account. Forecasts made while signed in are saved in a local SQLite file.
 
 ## Dataset
 
@@ -36,15 +42,15 @@ The baseline has slightly lower MAE on this holdout, and the forest has slightly
 
 ### Walk-forward model comparison
 
-With the bundled Reliance dataset selected, open **Walk-forward model benchmark** and click **Run walk-forward benchmark**. It compares Random Forest, Ridge regression, and histogram gradient boosting on the same return features, alongside the last-close baseline.
+Open **Model comparison** and click **Compare models on Reliance**. It compares Random Forest, Ridge regression, and histogram gradient boosting on the same return features, alongside the last-close baseline.
 
-The first fold trains through 2022 and scores 2023. The second expands training through 2023 and scores 2024. The dashboard reports MAE and RMSE for each year and across all 491 validation targets, ranks the methods by pooled MAE, and exports the scores as a CSV. Use **Train & predict** separately to evaluate the selected forecast model on the 2025 holdout.
+The first fold trains through 2022 and scores 2023. The second expands training through 2023 and scores 2024. The dashboard reports MAE and RMSE for each year and across all 491 validation targets, ranks the methods by pooled MAE, and exports the scores as a CSV. Use **Run forecast** separately to evaluate the selected forecast model on the 2025 holdout.
 
 On the bundled data, last close has the lowest pooled MAE at ₹11.967. Random Forest leads the trained models at ₹12.002.
 
 ### Optional LSTM comparison
 
-With Python 3.13 installed on Windows, create a separate environment for the optional LSTM and select **LSTM (adjusted close)** in the sidebar. The main app and Random Forest run with the standard requirements. [TensorFlow installation and supported versions](https://www.tensorflow.org/install/pip)
+With Python 3.13 installed on Windows, create a separate environment for the optional LSTM. In **Forecast**, open **Advanced settings** and select **LSTM (adjusted close)**. The main app and Random Forest run with the standard requirements. [TensorFlow installation and supported versions](https://www.tensorflow.org/install/pip)
 
 ```powershell
 py -3.13 -m venv .venv-lstm
