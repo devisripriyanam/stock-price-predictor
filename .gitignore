@@ -1,0 +1,5 @@
+.venv/
+.venv-lstm/
+__pycache__/
+*.py[cod]
+/stock_predictor.db*
